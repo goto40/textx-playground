@@ -1,0 +1,5 @@
+A:
+import "model_c.a"
+class B
+obj b_c:C
+
