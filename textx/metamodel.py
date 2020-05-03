@@ -89,6 +89,30 @@ class MetaAttr(object):
         self.position = position
 
 
+def _setattr(obj, name, value):
+    if hasattr(obj.__class__, '_tx_obj_attrs')\
+            and id(obj) in obj.__class__._tx_obj_attrs:
+        obj.__class__._tx_obj_attrs[id(obj)][name] = value
+    else:
+        setattr(obj, name, value)
+
+
+def _getattr(obj, name, *args):
+    if hasattr(obj.__class__, '_tx_obj_attrs')\
+            and id(obj) in obj.__class__._tx_obj_attrs:
+        return obj.__class__._tx_obj_attrs[id(obj)][name]
+    else:
+        return getattr(obj, name, *args)
+
+
+def _hasattr(obj, name):
+    if hasattr(obj.__class__, '_tx_obj_attrs')\
+            and id(obj) in obj.__class__._tx_obj_attrs:
+        return name in obj.__class__._tx_obj_attrs[id(obj)]
+    else:
+        return hasattr(obj, name)
+
+
 class TextXMetaModel(DebugPrinter):
     """
     Meta-model contains all information about language abstract syntax.
@@ -213,9 +237,6 @@ class TextXMetaModel(DebugPrinter):
         # Referenced languages
         self.referenced_languages = {}
 
-        # Dictionary for collecting __init__ parameters for user classes
-        self.obj_attrs = {}
-
         # Create new namespace for BASETYPE classes
         self._enter_namespace('__base__')
 
@@ -249,24 +270,6 @@ class TextXMetaModel(DebugPrinter):
         # Enter namespace for given file or None if metamodel is
         # constructed from string.
         self._enter_namespace(self._namespace_for_file_name(file_name))
-
-    def setattr(self, obj, attr_name, value):
-        if id(obj) in self.obj_attrs:
-            self.obj_attrs[id(obj)][attr_name] = value
-        else:
-            setattr(obj, attr_name, value)
-
-    def getattr(self, obj, attr_name):
-        if id(obj) in self.obj_attrs:
-            return self.obj_attrs[id(obj)][attr_name]
-        else:
-            return getattr(obj, attr_name)
-
-    def hasattr(self, obj, attr_name):
-        if id(obj) in self.obj_attrs:
-            return attr_name in self.obj_attrs[id(obj)]
-        else:
-            return hasattr(obj, attr_name)
 
     def register_scope_providers(self, sp):
         self.scope_providers = sp
@@ -400,7 +403,8 @@ class TextXMetaModel(DebugPrinter):
         return cls
 
     def _init_class(self, cls, peg_rule, position, position_end=None,
-                    inherits=None, root=False, rule_type=RULE_MATCH):
+                    inherits=None, root=False, rule_type=RULE_MATCH,
+                    external_attributes=False):
         """
         Setup meta-class special attributes, namespaces etc. This is called
         both for textX created classes as well as user classes.
@@ -435,6 +439,9 @@ class TextXMetaModel(DebugPrinter):
         if root:
             self.rootcls = cls
 
+        if external_attributes:
+            cls._tx_obj_attrs = {}
+
     def _cls_fqn(self, cls):
         """
         Returns fully qualified name for the class based on current namespace
@@ -454,34 +461,30 @@ class TextXMetaModel(DebugPrinter):
             user(bool): If this object is a user object store attributes
                 outside the object.
         """
-        if user:
-            # Create dictionary for obj which will contain all the attributes
-            self.obj_attrs[id(obj)] = dict()
-
         for attr in obj.__class__._tx_attrs.values():
             if attr.mult in [MULT_ZEROORMORE, MULT_ONEORMORE]:
                 # list
-                self.setattr(obj, attr.name, [])
+                _setattr(obj, attr.name, [])
             elif attr.cls.__name__ in BASE_TYPE_NAMES:
                 # Instantiate base python type
                 if self.auto_init_attributes:
-                    self.setattr(obj, attr.name,
-                                 python_type(attr.cls.__name__)())
+                    _setattr(obj, attr.name,
+                             python_type(attr.cls.__name__)())
                 else:
                     # See https://github.com/textX/textX/issues/11
                     if attr.bool_assignment:
                         # Only ?= assignments shall have default
                         # value of False.
-                        self.setattr(obj, attr.name, False)
+                        _setattr(obj, attr.name, False)
                     else:
                         # Set base type attribute to None initially
                         # in order to be able to detect if an optional
                         # values are given in the model. Default values
                         # can be specified using object processors.
-                        self.setattr(obj, attr.name, None)
+                        _setattr(obj, attr.name, None)
             else:
                 # Reference to other obj
-                self.setattr(obj, attr.name, None)
+                _setattr(obj, attr.name, None)
 
     def _new_cls_attr(self, clazz, name, cls=None, mult=MULT_ONE, cont=True,
                       ref=False, bool_assignment=False, position=0):
